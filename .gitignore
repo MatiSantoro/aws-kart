@@ -78,6 +78,7 @@ cover/
 *.pyo
 
 # CDK / Node
+!infra/lib/
 node_modules/
 cdk.out/
 *.js.map

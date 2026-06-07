@@ -124,7 +124,7 @@ namespace AwsKart.Network
     {
         // Replace this with the CDK stack output "ApiUrl" after deploying.
         // Example: "https://abc123.execute-api.us-east-1.amazonaws.com/prod/"
-        public const string API_BASE_URL = "https://YOUR_API_GATEWAY_URL/prod/";
+        public const string API_BASE_URL = "https://0e8si1sufg.execute-api.us-east-1.amazonaws.com/prod/";
 
         private const float REQUEST_TIMEOUT_SECONDS = 15f;
         private const int MAX_RETRIES = 2;
