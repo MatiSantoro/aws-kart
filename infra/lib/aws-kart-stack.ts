@@ -58,7 +58,10 @@ export class AwsKartStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ["bedrock:InvokeModel"],
       resources: [
-        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`,
+        // Foundation model (underlying)
+        `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`,
+        // Cross-region inference profile (required for on-demand invocation of Haiku 4.5)
+        `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`,
       ],
     });
 
@@ -95,14 +98,8 @@ export class AwsKartStack extends cdk.Stack {
     });
 
     commentatorFn.addToRolePolicy(bedrockInvokePolicy);
-
-    // Provisioned concurrency — eliminates ~400ms cold-start on commentary calls
-    const commentatorVersion = commentatorFn.currentVersion;
-    const commentatorAlias = new lambda.Alias(this, "CommentatorAlias", {
-      aliasName: "live",
-      version: commentatorVersion,
-      provisionedConcurrentExecutions: 1,
-    });
+    // Provisioned concurrency (1 instance) can be added here once the account's
+    // Lambda concurrency limit is raised above 10 via a Service Quotas increase request.
 
     // -------------------------------------------------------------------------
     // Lambda — Leaderboard  (DynamoDB CRUD)
@@ -183,7 +180,7 @@ export class AwsKartStack extends cdk.Stack {
     const methodOptions: apigateway.MethodOptions = { apiKeyRequired: true };
 
     const commentatorIntegration = new apigateway.LambdaIntegration(
-      commentatorAlias
+      commentatorFn
     );
     const leaderboardIntegration = new apigateway.LambdaIntegration(
       leaderboardFn

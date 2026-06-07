@@ -18,7 +18,7 @@ from decimal import Decimal
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-BEDROCK_MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
+BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 TABLE_NAME = os.environ.get("LEADERBOARD_TABLE_NAME", "AwsKartLeaderboard")
 
@@ -199,7 +199,7 @@ def _get_bedrock_flavor(powerup_id: str, character: str) -> str:
     request_body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 60,
-        "temperature": 0.95,
+        "temperature": 1.0,
         "messages": [{"role": "user", "content": prompt}],
     }
 

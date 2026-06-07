@@ -125,6 +125,7 @@ namespace AwsKart.Network
         // Replace this with the CDK stack output "ApiUrl" after deploying.
         // Example: "https://abc123.execute-api.us-east-1.amazonaws.com/prod/"
         public const string API_BASE_URL = "https://0e8si1sufg.execute-api.us-east-1.amazonaws.com/prod/";
+        private const string API_KEY = "eS21bbol8u7W0dBbvBlnB7tydpzZ5atVc8O0g2vi";
 
         private const float REQUEST_TIMEOUT_SECONDS = 15f;
         private const int MAX_RETRIES = 2;
@@ -354,6 +355,7 @@ namespace AwsKart.Network
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.SetRequestHeader("Accept", "application/json");
+            request.SetRequestHeader("x-api-key", API_KEY);
             request.timeout = (int)REQUEST_TIMEOUT_SECONDS;
 
             yield return request.SendWebRequest();
@@ -383,6 +385,7 @@ namespace AwsKart.Network
         {
             using var request = UnityWebRequest.Get(url);
             request.SetRequestHeader("Accept", "application/json");
+            request.SetRequestHeader("x-api-key", API_KEY);
             request.timeout = (int)REQUEST_TIMEOUT_SECONDS;
 
             yield return request.SendWebRequest();
