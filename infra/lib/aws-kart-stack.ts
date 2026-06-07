@@ -6,6 +6,9 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cw_actions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as sns from "aws-cdk-lib/aws-sns";
 
 export class AwsKartStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -55,7 +58,7 @@ export class AwsKartStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ["bedrock:InvokeModel"],
       resources: [
-        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-haiku-4-5-20251001`,
+        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`,
       ],
     });
 
@@ -92,6 +95,14 @@ export class AwsKartStack extends cdk.Stack {
     });
 
     commentatorFn.addToRolePolicy(bedrockInvokePolicy);
+
+    // Provisioned concurrency — eliminates ~400ms cold-start on commentary calls
+    const commentatorVersion = commentatorFn.currentVersion;
+    const commentatorAlias = new lambda.Alias(this, "CommentatorAlias", {
+      aliasName: "live",
+      version: commentatorVersion,
+      provisionedConcurrentExecutions: 1,
+    });
 
     // -------------------------------------------------------------------------
     // Lambda — Leaderboard  (DynamoDB CRUD)
@@ -152,12 +163,27 @@ export class AwsKartStack extends cdk.Stack {
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ["Content-Type", "Authorization", "X-Amz-Date"],
+        allowHeaders: ["Content-Type", "Authorization", "X-Amz-Date", "x-api-key"],
       },
     });
 
+    // API key + usage plan — prevents unauthenticated abuse of Bedrock endpoints
+    const apiKey = new apigateway.ApiKey(this, "AwsKartApiKey", {
+      apiKeyName: "AwsKartApiKey",
+      description: "API key for Meta Quest game client",
+    });
+
+    const usagePlan = new apigateway.UsagePlan(this, "AwsKartUsagePlan", {
+      name: "AwsKartUsagePlan",
+      throttle: { burstLimit: 50, rateLimit: 20 },
+      apiStages: [{ api, stage: api.deploymentStage }],
+    });
+    usagePlan.addApiKey(apiKey);
+
+    const methodOptions: apigateway.MethodOptions = { apiKeyRequired: true };
+
     const commentatorIntegration = new apigateway.LambdaIntegration(
-      commentatorFn
+      commentatorAlias
     );
     const leaderboardIntegration = new apigateway.LambdaIntegration(
       leaderboardFn
@@ -165,30 +191,74 @@ export class AwsKartStack extends cdk.Stack {
     const powerupsIntegration = new apigateway.LambdaIntegration(powerupsFn);
 
     // POST /commentary
-    api.root.addResource("commentary").addMethod("POST", commentatorIntegration);
+    api.root
+      .addResource("commentary")
+      .addMethod("POST", commentatorIntegration, methodOptions);
 
     // POST /leaderboard  — submit race result
     // GET  /leaderboard  — top times for a track (?track=us-east-1&limit=10)
     const leaderboardResource = api.root.addResource("leaderboard");
-    leaderboardResource.addMethod("POST", leaderboardIntegration);
-    leaderboardResource.addMethod("GET", leaderboardIntegration);
+    leaderboardResource.addMethod("POST", leaderboardIntegration, methodOptions);
+    leaderboardResource.addMethod("GET", leaderboardIntegration, methodOptions);
 
     // GET /leaderboard/global
     leaderboardResource
       .addResource("global")
-      .addMethod("GET", leaderboardIntegration);
+      .addMethod("GET", leaderboardIntegration, methodOptions);
 
     // GET /leaderboard/player/{playerId}
     leaderboardResource
       .addResource("player")
       .addResource("{playerId}")
-      .addMethod("GET", leaderboardIntegration);
+      .addMethod("GET", leaderboardIntegration, methodOptions);
 
     // POST /powerups/activate
     api.root
       .addResource("powerups")
       .addResource("activate")
-      .addMethod("POST", powerupsIntegration);
+      .addMethod("POST", powerupsIntegration, methodOptions);
+
+    // -------------------------------------------------------------------------
+    // CloudWatch alarms
+    // -------------------------------------------------------------------------
+
+    const alarmTopic = new sns.Topic(this, "AwsKartAlarmTopic", {
+      topicName: "AwsKartAlarms",
+      displayName: "AWS Kart VR — Lambda error and throttle alarms",
+    });
+
+    const snsAction = new cw_actions.SnsAction(alarmTopic);
+
+    const makeErrorAlarm = (
+      id: string,
+      fn: lambda.Function,
+      label: string
+    ) => {
+      const alarm = new cloudwatch.Alarm(this, id, {
+        metric: fn.metricErrors({ period: cdk.Duration.minutes(5) }),
+        threshold: 5,
+        evaluationPeriods: 1,
+        alarmDescription: `${label} Lambda errors > 5 in 5 minutes`,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+      alarm.addAlarmAction(snsAction);
+      return alarm;
+    };
+
+    makeErrorAlarm("CommentatorErrorAlarm", commentatorFn, "Commentator");
+    makeErrorAlarm("LeaderboardErrorAlarm", leaderboardFn, "Leaderboard");
+    makeErrorAlarm("PowerupsErrorAlarm", powerupsFn, "Powerups");
+
+    // Throttle alarm on commentator — provisioned concurrency makes this a real signal
+    const throttleAlarm = new cloudwatch.Alarm(this, "CommentatorThrottleAlarm", {
+      metric: commentatorFn.metricThrottles({ period: cdk.Duration.minutes(1) }),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      alarmDescription: "Commentator Lambda throttled — consider raising provisioned concurrency",
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    throttleAlarm.addAlarmAction(snsAction);
 
     // -------------------------------------------------------------------------
     // Stack outputs
@@ -199,6 +269,17 @@ export class AwsKartStack extends cdk.Stack {
       description:
         'Paste into ApiClient.cs as API_BASE_URL (e.g. "https://xxx.execute-api.us-east-1.amazonaws.com/prod/").',
       exportName: "AwsKartApiUrl",
+    });
+
+    new cdk.CfnOutput(this, "ApiKeyId", {
+      value: apiKey.keyId,
+      description:
+        "API key ID — retrieve the actual value with: aws apigateway get-api-key --api-key <id> --include-value --query value --output text",
+    });
+
+    new cdk.CfnOutput(this, "AlarmTopicArn", {
+      value: alarmTopic.topicArn,
+      description: "SNS topic for Lambda error/throttle alarms. Subscribe your email to receive alerts.",
     });
 
     new cdk.CfnOutput(this, "LeaderboardTableArn", {

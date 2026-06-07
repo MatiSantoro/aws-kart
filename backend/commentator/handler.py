@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-BEDROCK_MODEL_ID = "anthropic.claude-haiku-4-5-20251001"
+BEDROCK_MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 
 # Fallback comments when Bedrock is unavailable

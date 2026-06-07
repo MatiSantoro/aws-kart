@@ -18,7 +18,7 @@ from decimal import Decimal
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-BEDROCK_MODEL_ID = "anthropic.claude-haiku-4-5-20251001"
+BEDROCK_MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 TABLE_NAME = os.environ.get("LEADERBOARD_TABLE_NAME", "AwsKartLeaderboard")
 
